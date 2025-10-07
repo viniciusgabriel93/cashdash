@@ -11,7 +11,14 @@
     "mensal": []
   },
   "MARCELO": {
-    "semanal": [],
+    "semanal": [
+      {
+        "data": "2025-10-07T14:21:31.312Z",
+        "arrecadacao": 39647,
+        "lucro": 16413,
+        "saidas": 23500
+      }
+    ],
     "mensal": []
   }
 }
