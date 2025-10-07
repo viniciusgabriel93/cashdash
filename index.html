@@ -1,0 +1,780 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>CASH - DASH de Operações</title>
+<!--
+  INDEX.HTML - CASH DASH
+  - Single-file dashboard + data editor
+  - Reads / writes https://github.com/viniciusgabriel93/cashdash/data.json (branch main)
+  - Auto-refresh: 10s
+  - Token (PAT) saved to localStorage by the client when you input it (only needed to WRITE).
+  - Comments added throughout to explain behavior.
+-->
+<style>
+  /* ---------- Reset / Base ---------- */
+  :root{
+    --bg:#0f1724;
+    --card:#0b1220;
+    --muted:#94a3b8;
+    --accent:#06b6d4;
+    --green:#16a34a;
+    --red:#ef4444;
+    --blue:#2563eb;
+    --glass: rgba(255,255,255,0.03);
+    --glass-2: rgba(255,255,255,0.02);
+    --card-padding:18px;
+    --radius:12px;
+    font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+    color-scheme: dark;
+  }
+  html,body{ height:100%; margin:0; background:linear-gradient(180deg,#071021 0%, #071827 60%); color:#e6eef6; }
+  a{ color:var(--accent) }
+  .container{ max-width:1280px; margin:18px auto; padding:12px; }
+  header{ display:flex; align-items:center; justify-content:space-between; gap:12px; }
+  .logo { font-weight:800; letter-spacing:1px; font-size:20px; color:#ffd24d; }
+  .title-wrap{ text-align:center; flex:1; }
+  h1{ margin:0; font-size:20px; }
+  .sub{ color:var(--muted); font-size:13px; margin-top:4px; }
+
+  /* Top controls */
+  .top-controls{ display:flex; align-items:center; gap:10px; justify-content:center; margin-top:10px; }
+  select, button { background:var(--glass); border:1px solid rgba(255,255,255,0.04); color:inherit; padding:8px 10px; border-radius:8px; font-size:14px; }
+  select{ min-width:200px; }
+
+  /* DASH cards */
+  .cards{ display:grid; grid-template-columns:1fr 1fr; gap:18px; margin-top:18px; }
+  .card{ background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01)); padding:var(--card-padding); border-radius:var(--radius); box-shadow:0 6px 20px rgba(2,6,23,0.6); min-height:220px; display:flex; flex-direction:column; justify-content:space-between; }
+  .card h2{ margin:0; font-size:18px; display:flex; align-items:center; gap:8px; }
+  .card .values{ margin-top:12px; display:flex; flex-direction:column; gap:8px; }
+  .line{ display:flex; justify-content:space-between; align-items:center; }
+  .label{ color:var(--muted); font-size:13px; }
+  .amount{ font-weight:700; font-size:18px; }
+
+  /* Result indicator */
+  .result-indicator{ display:flex; align-items:center; gap:10px; font-weight:800; font-size:16px; }
+  .result-indicator .emoji{ font-size:22px; }
+
+  /* gear button */
+  .gear{ position:fixed; right:18px; bottom:18px; background:var(--glass); border-radius:50%; width:58px; height:58px; display:flex; align-items:center; justify-content:center; cursor:pointer; box-shadow:0 8px 30px rgba(2,6,23,0.6); border:1px solid rgba(255,255,255,0.03); }
+  .gear:hover{ transform:scale(1.03) }
+
+  /* Data screen */
+  .data-screen{ position:fixed; inset:40px; background:linear-gradient(180deg, rgba(4,8,15,0.98), rgba(2,6,11,0.98)); border-radius:12px; padding:22px; box-shadow:0 40px 80px rgba(2,6,23,0.7); display:none; flex-direction:column; z-index:999; }
+  .data-top{ display:flex; align-items:center; justify-content:space-between; }
+  .data-body{ display:flex; gap:18px; margin-top:18px; flex:1; }
+  .left{ width:320px; display:flex; flex-direction:column; gap:12px; }
+  .right{ flex:1; background:var(--glass-2); border-radius:10px; padding:14px; display:flex; flex-direction:column; gap:10px; }
+  .input-row{ display:flex; align-items:center; gap:8px; justify-content:space-between; }
+  .num{ width:180px; padding:8px 10px; border-radius:8px; border:1px solid rgba(255,255,255,0.04); background:transparent; color:inherit; font-size:15px; text-align:right; }
+
+  /* history */
+  .history{ margin-top:16px; overflow:auto; max-height:240px; background:linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.005)); padding:10px; border-radius:8px; }
+  .hist-item{ display:flex; justify-content:space-between; align-items:center; padding:8px; border-radius:6px; gap:8px; border:1px solid rgba(255,255,255,0.02); margin-bottom:8px; }
+  .hist-meta{ color:var(--muted); font-size:13px; }
+  .small-btn{ background:transparent; border:1px solid rgba(255,255,255,0.04); padding:6px 8px; border-radius:6px; cursor:pointer; }
+
+  /* responsive */
+  @media(max-width:880px){
+    .cards{ grid-template-columns:1fr; }
+    .data-screen{ inset:12px; padding:12px; }
+    .left{ width:100%; }
+    .data-body{ flex-direction:column; }
+  }
+</style>
+</head>
+<body>
+  <div class="container">
+    <!-- Header with logo left, title center (with operation selector) and logo right -->
+    <header>
+      <div class="logo">CASH</div>
+      <div class="title-wrap">
+        <h1>Resultados: 
+          <!-- Operation selector (Semanal / Mensal) -->
+          <span style="font-weight:600; margin-left:8px;">
+            <select id="operationSelect" title="Selecione Operação">
+              <option value="semanal">Operações Semanais</option>
+              <option value="mensal">Operações Mensais</option>
+            </select>
+          </span>
+        </h1>
+        <div class="sub">Painel centralizado de operações — ROTA LÉO e ROTA MARCELO</div>
+      </div>
+      <div class="logo">CASH</div>
+    </header>
+
+    <!-- Top controls / instructions -->
+    <div class="top-controls" style="justify-content:flex-end;">
+      <div style="color:var(--muted); font-size:13px; margin-right:auto;">TV: mantenha a página aberta em tela cheia. Atualiza automaticamente a cada 10s.</div>
+      <button id="manualRefresh" title="Atualizar agora">Atualizar agora</button>
+    </div>
+
+    <!-- Cards for LÉO and MARCELO -->
+    <div class="cards" id="cardsWrap">
+      <!-- Card LÉO -->
+      <div class="card" id="cardLEO">
+        <div>
+          <h2>🟦 LÉO</h2>
+          <!-- Result indicator area -->
+          <div class="result-indicator" id="leoIndicator">
+            <span class="emoji">🔵🚀</span>
+            <span class="muted label">Status</span>
+            <span id="leoResultText" style="margin-left:8px;color:var(--muted);font-weight:600;"></span>
+          </div>
+          <div class="values" style="margin-top:14px;">
+            <div class="line"><div class="label">💵 Arrecadação</div><div class="amount" id="leoArrec">R$ 0,00</div></div>
+            <div class="line"><div class="label">💰 Lucro</div><div class="amount" id="leoLucro">R$ 0,00</div></div>
+            <div class="line"><div class="label">📤 Saídas</div><div class="amount" id="leoSaidas">R$ 0,00</div></div>
+          </div>
+        </div>
+        <div style="text-align:right; color:var(--muted); font-size:13px;">Última atualização: <span id="leoUpdated">—</span></div>
+      </div>
+
+      <!-- Card MARCELO -->
+      <div class="card" id="cardMARCELO">
+        <div>
+          <h2>🟥 MARCELO</h2>
+          <!-- Result indicator area -->
+          <div class="result-indicator" id="marIndicator">
+            <span class="emoji">🔵🚀</span>
+            <span class="muted label">Status</span>
+            <span id="marResultText" style="margin-left:8px;color:var(--muted);font-weight:600;"></span>
+          </div>
+          <div class="values" style="margin-top:14px;">
+            <div class="line"><div class="label">💵 Arrecadação</div><div class="amount" id="marArrec">R$ 0,00</div></div>
+            <div class="line"><div class="label">💰 Lucro</div><div class="amount" id="marLucro">R$ 0,00</div></div>
+            <div class="line"><div class="label">📤 Saídas</div><div class="amount" id="marSaidas">R$ 0,00</div></div>
+          </div>
+        </div>
+        <div style="text-align:right; color:var(--muted); font-size:13px;">Última atualização: <span id="marUpdated">—</span></div>
+      </div>
+    </div>
+
+    <!-- Consolidated / optional totals -->
+    <div style="margin-top:16px; display:flex; justify-content:space-between; align-items:center;">
+      <div style="color:var(--muted);">Consolidado (LEO + MARCELO)</div>
+      <div style="font-weight:800;">Total no período: <span id="consolidadoTotal">R$ 0,00</span></div>
+    </div>
+  </div>
+
+  <!-- Gear button: toggles data screen -->
+  <div class="gear" id="gearBtn" title="Abrir/Fechar DADOS">⚙️</div>
+
+  <!-- Data screen (hidden by default) -->
+  <div class="data-screen" id="dataScreen" role="dialog" aria-hidden="true">
+    <div class="data-top">
+      <h2 style="margin:0;">DADOS</h2>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <!-- Token controls: to input PAT for GitHub writes -->
+        <button id="showTokenBtn" class="small-btn" title="Inserir/Atualizar token (apenas no celular)">Inserir/Atualizar Token</button>
+        <button id="closeData" class="small-btn">Fechar</button>
+      </div>
+    </div>
+
+    <div class="data-body">
+      <!-- Left: selectors -->
+      <div class="left">
+        <div style="display:flex; flex-direction:column; gap:8px;">
+          <div>
+            <div class="label" style="margin-bottom:6px;">OPERAÇÃO</div>
+            <select id="operationInput" style="width:100%;">
+              <option value="semanal">SEMANAL</option>
+              <option value="mensal">MENSAL</option>
+            </select>
+          </div>
+
+          <div>
+            <div class="label" style="margin-bottom:6px;">ROTA</div>
+            <select id="rotaInput" style="width:100%;">
+              <option value="LEO">LÉO</option>
+              <option value="MARCELO">MARCELO</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Token input modal area (hidden normally, toggled by button) -->
+        <div id="tokenBox" style="margin-top:12px; display:none;">
+          <div class="label">Cole aqui seu GitHub PAT (apenas para commits)</div>
+          <input id="tokenInput" type="password" placeholder="ghp_xxx..." style="width:100%; margin-top:6px; padding:8px; border-radius:8px; border:1px solid rgba(255,255,255,0.04); background:transparent; color:inherit;" />
+          <div style="display:flex; gap:8px; margin-top:8px;">
+            <button id="saveToken" class="small-btn">Salvar Token</button>
+            <button id="clearToken" class="small-btn">Remover Token</button>
+          </div>
+          <div id="tokenInfo" style="margin-top:8px; color:var(--muted); font-size:13px;">Token salvo localmente no navegador do celular (localStorage).</div>
+        </div>
+
+        <!-- History (centralized area below selectors) -->
+        <div style="margin-top:14px;">
+          <div class="label" style="margin-bottom:8px;">Histórico de lançamentos</div>
+          <div class="history" id="historyList">
+            <!-- Items appended dynamically -->
+            <div style="color:var(--muted); text-align:center;">Nenhum lançamento encontrado</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: input fields and accumulated values -->
+      <div class="right">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div style="font-weight:700;">Entrada de valores</div>
+          <div style="color:var(--muted); font-size:13px;" id="liveSummary">Sumário: —</div>
+        </div>
+
+        <!-- Arrecadação -->
+        <div>
+          <div class="label">ARRECADAÇÃO</div>
+          <div style="display:flex; gap:8px; align-items:center; margin-top:6px;">
+            <input id="inputArrec" type="number" min="0" placeholder="0.00" class="num" />
+            <div style="flex:1; color:var(--muted); font-size:13px;">Acumulado: <span id="accArrec">R$ 0,00</span></div>
+          </div>
+        </div>
+
+        <!-- Lucro -->
+        <div>
+          <div class="label">LUCRO</div>
+          <div style="display:flex; gap:8px; align-items:center; margin-top:6px;">
+            <input id="inputLucro" type="number" min="0" placeholder="0.00" class="num" />
+            <div style="flex:1; color:var(--muted); font-size:13px;">Acumulado: <span id="accLucro">R$ 0,00</span></div>
+          </div>
+        </div>
+
+        <!-- Saídas -->
+        <div>
+          <div class="label">SAÍDAS</div>
+          <div style="display:flex; gap:8px; align-items:center; margin-top:6px;">
+            <input id="inputSaidas" type="number" min="0" placeholder="0.00" class="num" />
+            <div style="flex:1; color:var(--muted); font-size:13px;">Acumulado: <span id="accSaidas">R$ 0,00</span></div>
+          </div>
+        </div>
+
+        <!-- Submit -->
+        <div style="margin-top:12px; display:flex; justify-content:center;">
+          <button id="submitBtn" style="padding:10px 18px; border-radius:10px; font-weight:800;">ENVIAR</button>
+        </div>
+
+        <!-- Status area -->
+        <div id="statusArea" style="margin-top:10px; color:var(--muted); font-size:13px;"></div>
+      </div>
+    </div>
+  </div>
+
+<script>
+/*
+  JAVASCRIPT - CASH DASH
+  - Core responsibilities:
+    * Fetch data.json (public read) from raw GitHub URL
+    * Render values for LEO and MARCELO by operation (semanal/mensal)
+    * Toggle data screen with gear button
+    * Allow creating new records (timestamped) and push to GitHub via API (requires token)
+    * Maintain and show history; allow deletion (also via GitHub API)
+    * Auto-refresh every 10s (paused while data entry screen is open)
+    * LocalStorage: stores the token (key: cashdash_token)
+*/
+
+(() => {
+  // ---------- Configuration (edit only if repo/branch change) ----------
+  const GITHUB_USER = 'viniciusgabriel93';
+  const GITHUB_REPO = 'cashdash';
+  const GITHUB_BRANCH = 'main';
+  const DATA_PATH = 'data.json'; // path in repo
+  const RAW_URL = `https://raw.githubusercontent.com/${GITHUB_USER}/${GITHUB_REPO}/${GITHUB_BRANCH}/${DATA_PATH}`;
+  const API_CONTENTS_URL = `https://api.github.com/repos/${GITHUB_USER}/${GITHUB_REPO}/contents/${DATA_PATH}`;
+  const AUTO_REFRESH_MS = 10000; // 10s as requested
+
+  // ---------- DOM references ----------
+  const operationSelect = document.getElementById('operationSelect');
+  const manualRefreshBtn = document.getElementById('manualRefresh');
+
+  // LEO elements
+  const leoArrecEl = document.getElementById('leoArrec');
+  const leoLucroEl = document.getElementById('leoLucro');
+  const leoSaidasEl = document.getElementById('leoSaidas');
+  const leoIndicator = document.getElementById('leoIndicator');
+  const leoResultText = document.getElementById('leoResultText');
+  const leoUpdatedEl = document.getElementById('leoUpdated');
+
+  // MARCELO elements
+  const marArrecEl = document.getElementById('marArrec');
+  const marLucroEl = document.getElementById('marLucro');
+  const marSaidasEl = document.getElementById('marSaidas');
+  const marIndicator = document.getElementById('marIndicator');
+  const marResultText = document.getElementById('marResultText');
+  const marUpdatedEl = document.getElementById('marUpdated');
+
+  const consolidadoTotalEl = document.getElementById('consolidadoTotal');
+
+  // Data screen
+  const gearBtn = document.getElementById('gearBtn');
+  const dataScreen = document.getElementById('dataScreen');
+  const closeData = document.getElementById('closeData');
+  const operationInput = document.getElementById('operationInput');
+  const rotaInput = document.getElementById('rotaInput');
+  const inputArrec = document.getElementById('inputArrec');
+  const inputLucro = document.getElementById('inputLucro');
+  const inputSaidas = document.getElementById('inputSaidas');
+  const accArrec = document.getElementById('accArrec');
+  const accLucro = document.getElementById('accLucro');
+  const accSaidas = document.getElementById('accSaidas');
+  const submitBtn = document.getElementById('submitBtn');
+  const statusArea = document.getElementById('statusArea');
+  const historyList = document.getElementById('historyList');
+  const liveSummary = document.getElementById('liveSummary');
+
+  // Token controls
+  const showTokenBtn = document.getElementById('showTokenBtn');
+  const tokenBox = document.getElementById('tokenBox');
+  const tokenInput = document.getElementById('tokenInput');
+  const saveTokenBtn = document.getElementById('saveToken');
+  const clearTokenBtn = document.getElementById('clearToken');
+  const tokenInfo = document.getElementById('tokenInfo');
+
+  // localStorage key for token
+  const TOKEN_KEY = 'cashdash_token_v1';
+
+  // ---------- In-memory state ----------
+  let dataJson = null; // will hold the JSON content
+  let fileSha = null;  // sha of data.json in git (required for updates)
+  let autoRefreshTimer = null;
+  let isDataScreenOpen = false;
+
+  // ---------- Helpers ----------
+  function fmtBRL(n){
+    const num = Number(n) || 0;
+    return num.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  }
+
+  function nowISO(){ return new Date().toISOString(); }
+  function shortDate(iso){ 
+    try{
+      const d = new Date(iso);
+      return d.toLocaleString('pt-BR', { dateStyle:'short', timeStyle:'short' });
+    }catch(e){ return iso; }
+  }
+
+  // Safe base64 (for GitHub API)
+  function toBase64(str){
+    // btoa handles binary poorly; use this robust variant
+    return btoa(unescape(encodeURIComponent(str)));
+  }
+
+  // ---------- Fetch data.json (public raw) ----------
+  async function fetchDataRaw(){
+    try{
+      const res = await fetch(RAW_URL + '?_=' + Date.now(), { cache: 'no-store' });
+      if(!res.ok) throw new Error('Falha ao buscar data.json (raw). Código: ' + res.status);
+      const json = await res.json();
+      // After reading raw, we still need the file SHA for updates - get it from contents API
+      await fetchFileSha();
+      dataJson = json;
+      return json;
+    }catch(err){
+      console.error('fetchDataRaw error', err);
+      statusArea.textContent = 'Erro ao ler dados: ' + err.message;
+      return null;
+    }
+  }
+
+  // ---------- Get file SHA (required for PUT updates) ----------
+  async function fetchFileSha(){
+    try{
+      const res = await fetch(API_CONTENTS_URL + '?ref=' + GITHUB_BRANCH, { cache:'no-store' });
+      if(!res.ok) throw new Error('Erro ao obter metadata do arquivo: ' + res.status);
+      const j = await res.json();
+      fileSha = j.sha;
+      return fileSha;
+    }catch(err){
+      console.warn('fetchFileSha warning', err);
+      fileSha = null;
+      return null;
+    }
+  }
+
+  // ---------- Render UI based on dataJson and selected operation ----------
+  function renderAll(){
+    const op = operationSelect.value; // semanal | mensal
+    if(!dataJson) { // show zeros
+      leoArrecEl.textContent = 'R$ 0,00';
+      leoLucroEl.textContent = 'R$ 0,00';
+      leoSaidasEl.textContent = 'R$ 0,00';
+      marArrecEl.textContent = 'R$ 0,00';
+      marLucroEl.textContent = 'R$ 0,00';
+      marSaidasEl.textContent = 'R$ 0,00';
+      consolidadoTotalEl.textContent = 'R$ 0,00';
+      return;
+    }
+
+    // Safely access arrays (if missing, treat as [])
+    const leoArr = (dataJson.LEO && dataJson.LEO[op]) ? dataJson.LEO[op] : [];
+    const marArr = (dataJson.MARCELO && dataJson.MARCELO[op]) ? dataJson.MARCELO[op] : [];
+
+    // Sum up values
+    const sum = arr => arr.reduce((acc, it) => {
+      const a = Number(it.arrecadacao) || 0;
+      const b = Number(it.lucro) || 0;
+      const c = Number(it.saidas) || 0;
+      return { arrec: acc.arrec + a, lucro: acc.lucro + b, saidas: acc.saidas + c };
+    }, {arrec:0, lucro:0, saidas:0});
+
+    const leoS = sum(leoArr);
+    const marS = sum(marArr);
+
+    // Update UI values
+    leoArrecEl.textContent = fmtBRL(leoS.arrec);
+    leoLucroEl.textContent = fmtBRL(leoS.lucro);
+    leoSaidasEl.textContent = fmtBRL(leoS.saidas);
+
+    marArrecEl.textContent = fmtBRL(marS.arrec);
+    marLucroEl.textContent = fmtBRL(marS.lucro);
+    marSaidasEl.textContent = fmtBRL(marS.saidas);
+
+    // Results (Arrecadação - Lucro - Saídas)
+    const leoResult = leoS.arrec - leoS.lucro - leoS.saidas;
+    const marResult = marS.arrec - marS.lucro - marS.saidas;
+
+    // Update indicator for LEO
+    updateIndicator(leoIndicator, leoResult, leoResultText);
+    updateIndicator(marIndicator, marResult, marResultText);
+
+    // Last update stamps (we'll use latest record timestamps if present)
+    leoUpdatedEl.textContent = leoArr.length ? shortDate(leoArr[leoArr.length - 1].data) : '—';
+    marUpdatedEl.textContent = marArr.length ? shortDate(marArr[marArr.length - 1].data) : '—';
+
+    // Consolidated
+    const consolidated = leoS.arrec + marS.arrec - (leoS.lucro + marS.lucro) - (leoS.saidas + marS.saidas);
+    consolidadoTotalEl.textContent = fmtBRL(leoS.arrec + marS.arrec);
+
+    // Update data screen accumulated values (if open)
+    accArrec.textContent = fmtBRL(op === operationInput.value && rotaInput.value === 'LEO' ? leoS.arrec : (rotaInput.value === 'MARCELO' && op === operationInput.value ? marS.arrec : (rotaInput.value==='LEO'? fmtBRL(leoS.arrec):fmtBRL(marS.arrec))));
+    // Simpler: update based on current selection in data screen:
+    updateAccumulatorsForDataScreen();
+
+    // Update history UI
+    renderHistory(leoArr, marArr, op);
+  }
+
+  // Update indicator UI (emoji and color) according to result sign rules:
+  // Negative (expansão) -> Azul + 🔵🚀
+  // Zero (estável) -> Verde + 🟢⚖️
+  // Positive (retração) -> Vermelho + 🔴📉
+  function updateIndicator(indicatorEl, resultValue, textEl){
+    const emojiSpan = indicatorEl.querySelector('.emoji');
+    if(resultValue < 0){
+      emojiSpan.textContent = '🔵🚀';
+      indicatorEl.style.color = ''; // default color
+      textEl.textContent = `Expansão (${fmtBRL(resultValue)})`;
+      // set blue color to the emoji area (we'll color the whole indicator for clarity)
+      indicatorEl.style.color = 'var(--blue)';
+    } else if(resultValue === 0){
+      emojiSpan.textContent = '🟢⚖️';
+      indicatorEl.style.color = 'var(--green)';
+      textEl.textContent = `Estável (${fmtBRL(resultValue)})`;
+    } else {
+      emojiSpan.textContent = '🔴📉';
+      indicatorEl.style.color = 'var(--red)';
+      textEl.textContent = `Retração (${fmtBRL(resultValue)})`;
+    }
+  }
+
+  // ---------- History rendering ----------
+  // We'll render a combined history list for the selected operation (op).
+  function renderHistory(leoArr, marArr, op){
+    // Build combined array with meta: {rota, op, data, arrecadacao, lucro, saidas, id}
+    const norm = arr => arr.map(it => ({
+      rota: 'LEO',
+      op,
+      data: it.data,
+      arrecadacao: Number(it.arrecadacao)||0,
+      lucro: Number(it.lucro)||0,
+      saidas: Number(it.saidas)||0,
+      id: it.data // use timestamp as ID (should be unique)
+    }));
+    const normMar = marArr.map(it => ({
+      rota: 'MARCELO',
+      op,
+      data: it.data,
+      arrecadacao: Number(it.arrecadacao)||0,
+      lucro: Number(it.lucro)||0,
+      saidas: Number(it.saidas)||0,
+      id: it.data
+    }));
+
+    // If the arrays are for the chosen op we already passed them as leoArr, marArr
+    const combined = (leoArr || []).map(it => ({ rota:'LEO', data:it.data, arrecadacao:Number(it.arrecadacao)||0, lucro:Number(it.lucro)||0, saidas:Number(it.saidas)||0, id:it.data }))
+      .concat((marArr || []).map(it => ({ rota:'MARCELO', data:it.data, arrecadacao:Number(it.arrecadacao)||0, lucro:Number(it.lucro)||0, saidas:Number(it.saidas)||0, id:it.data })))
+      // sort by date descending
+      .sort((a,b)=> new Date(b.data) - new Date(a.data));
+
+    // Render
+    historyList.innerHTML = '';
+    if(combined.length === 0){
+      historyList.innerHTML = '<div style="color:var(--muted); text-align:center;">Nenhum lançamento encontrado</div>';
+      return;
+    }
+    combined.forEach(item => {
+      const itemEl = document.createElement('div');
+      itemEl.className = 'hist-item';
+      const left = document.createElement('div');
+      left.style.display='flex'; left.style.flexDirection='column';
+      const meta = document.createElement('div'); meta.className='hist-meta';
+      meta.textContent = `[${shortDate(item.data)}] ${item.rota} (${item.op})`;
+      const vals = document.createElement('div'); vals.style.fontWeight=700;
+      vals.textContent = `${fmtBRL(item.arrecadacao)} | Lucro ${fmtBRL(item.lucro)} | Saídas ${fmtBRL(item.saidas)}`;
+      left.appendChild(meta); left.appendChild(vals);
+
+      const right = document.createElement('div');
+      right.style.display='flex'; right.style.alignItems='center'; right.style.gap='8px';
+      const delBtn = document.createElement('button');
+      delBtn.className='small-btn';
+      delBtn.textContent='❌ Excluir';
+      delBtn.title = 'Excluir este lançamento (irá atualizar no GitHub)';
+      delBtn.addEventListener('click', ()=> handleDeleteEntry(item));
+
+      right.appendChild(delBtn);
+
+      itemEl.appendChild(left); itemEl.appendChild(right);
+      historyList.appendChild(itemEl);
+    });
+  }
+
+  // ---------- Data screen helpers ----------
+  function openDataScreen(){
+    dataScreen.style.display = 'flex';
+    dataScreen.setAttribute('aria-hidden','false');
+    isDataScreenOpen = true;
+    pauseAutoRefresh();
+    // update accumulators and history
+    updateAccumulatorsForDataScreen();
+  }
+  function closeDataScreen(){
+    dataScreen.style.display = 'none';
+    dataScreen.setAttribute('aria-hidden','true');
+    isDataScreenOpen = false;
+    resumeAutoRefresh();
+  }
+
+  // Update accumulated values according to current selections on the data screen
+  function updateAccumulatorsForDataScreen(){
+    const op = operationInput.value;
+    const rota = rotaInput.value;
+    if(!dataJson) {
+      accArrec.textContent = 'R$ 0,00';
+      accLucro.textContent = 'R$ 0,00';
+      accSaidas.textContent = 'R$ 0,00';
+      return;
+    }
+    const arr = (dataJson[rota] && dataJson[rota][op]) ? dataJson[rota][op] : [];
+    const a = arr.reduce((s,it)=> s + (Number(it.arrecadacao)||0), 0);
+    const b = arr.reduce((s,it)=> s + (Number(it.lucro)||0), 0);
+    const c = arr.reduce((s,it)=> s + (Number(it.saidas)||0), 0);
+    accArrec.textContent = fmtBRL(a);
+    accLucro.textContent = fmtBRL(b);
+    accSaidas.textContent = fmtBRL(c);
+    liveSummary.textContent = `Acumulado atual: ${fmtBRL(a)} • ${fmtBRL(b)} • ${fmtBRL(c)}`;
+  }
+
+  // ---------- Submit new entry (create record and push to GitHub) ----------
+  // Creates an object: { data: ISO, arrecadacao, lucro, saidas }
+  async function handleSubmit(){
+    const op = operationInput.value;
+    const rota = rotaInput.value;
+    const a = Number(inputArrec.value) || 0;
+    const b = Number(inputLucro.value) || 0;
+    const c = Number(inputSaidas.value) || 0;
+
+    if(a===0 && b===0 && c===0){
+      statusArea.textContent = 'Insira pelo menos um valor diferente de zero.';
+      return;
+    }
+    statusArea.textContent = 'Enviando...';
+    submitBtn.disabled = true;
+
+    // Create new entry
+    const entry = { data: nowISO(), arrecadacao: a, lucro: b, saidas: c };
+
+    // Update local copy
+    if(!dataJson) dataJson = { LEO:{semanal:[],mensal:[]}, MARCELO:{semanal:[],mensal:[]} };
+    if(!dataJson[rota]) dataJson[rota] = { semanal:[], mensal:[] };
+    if(!dataJson[rota][op]) dataJson[rota][op] = [];
+    dataJson[rota][op].push(entry);
+
+    try{
+      // Persist to GitHub
+      const token = localStorage.getItem(TOKEN_KEY);
+      if(!token){
+        statusArea.textContent = 'Token não encontrado. Clique em "Inserir/Atualizar Token" e cole seu PAT (apenas no celular).';
+        submitBtn.disabled = false;
+        // revert local push: remove last
+        dataJson[rota][op].pop();
+        return;
+      }
+
+      await pushDataJsonToGitHub(dataJson, token, `Add entry ${rota} ${op} ${entry.data}`);
+      statusArea.textContent = 'Enviado com sucesso.';
+      // clear inputs
+      inputArrec.value=''; inputLucro.value=''; inputSaidas.value='';
+      // re-render
+      renderAll();
+    }catch(err){
+      console.error('Error sending', err);
+      statusArea.textContent = 'Erro ao enviar: ' + err.message;
+      // revert local push
+      dataJson[rota][op].pop();
+    } finally {
+      submitBtn.disabled = false;
+    }
+  }
+
+  // ---------- Delete an entry ----------
+  // We identify entries by their timestamp (entry.data). When deleting, we remove the matching item from the specific rota/op array
+  async function handleDeleteEntry(item){
+    if(!confirm(`Excluir lançamento de ${shortDate(item.data)} - ${item.rota} (${item.op}) ?`)) return;
+    statusArea.textContent = 'Excluindo...';
+    try{
+      const token = localStorage.getItem(TOKEN_KEY);
+      if(!token){
+        statusArea.textContent = 'Token não encontrado. Insira o PAT para permitir exclusão.';
+        return;
+      }
+      // Remove from local dataJson
+      const arr = dataJson[item.rota][item.op];
+      const idx = arr.findIndex(x => x.data === item.data);
+      if(idx === -1) { statusArea.textContent = 'Registro não encontrado localmente.'; return; }
+      arr.splice(idx,1);
+
+      // Push updated JSON
+      await pushDataJsonToGitHub(dataJson, token, `Remove entry ${item.rota} ${item.op} ${item.data}`);
+      statusArea.textContent = 'Excluído com sucesso.';
+      renderAll();
+    }catch(err){
+      console.error('delete error', err);
+      statusArea.textContent = 'Erro ao excluir: ' + err.message;
+    }
+  }
+
+  // ---------- GitHub API: push updated data.json ----------
+  // This function PUTs to the contents API. Requires:
+  // - token with repo:contents permissions (or public repo + public_repo)
+  // - fileSha variable set (we attempt to fetch if missing)
+  async function pushDataJsonToGitHub(newJson, token, commitMessage = 'Update data.json'){
+    try{
+      // Ensure we have fileSha
+      if(!fileSha) await fetchFileSha();
+      // Prepare content
+      const contentStr = JSON.stringify(newJson, null, 2);
+      const b64 = toBase64(contentStr);
+      const body = {
+        message: commitMessage,
+        content: b64,
+        branch: GITHUB_BRANCH,
+      };
+      if(fileSha) body.sha = fileSha;
+
+      // Send request
+      const res = await fetch(API_CONTENTS_URL, {
+        method: 'PUT',
+        headers: {
+          'Authorization': 'token ' + token,
+          'Accept': 'application/vnd.github+json',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(body)
+      });
+      if(!res.ok){
+        const errText = await res.text();
+        throw new Error('GitHub API retornou ' + res.status + ' — ' + errText);
+      }
+      const j = await res.json();
+      // Update local fileSha with new sha returned by GitHub
+      fileSha = j.content && j.content.sha ? j.content.sha : fileSha;
+      // Optionally re-fetch raw to ensure parity
+      await fetchDataRaw();
+      return j;
+    }catch(err){
+      throw err;
+    }
+  }
+
+  // ---------- Auto-refresh logic ----------
+  async function doRefresh(){
+    // If data screen is open, we skip auto refresh to avoid clobbering in-progress edits
+    if(isDataScreenOpen) return;
+    await fetchDataRaw();
+    renderAll();
+  }
+  function startAutoRefresh(){
+    if(autoRefreshTimer) clearInterval(autoRefreshTimer);
+    autoRefreshTimer = setInterval(()=> doRefresh(), AUTO_REFRESH_MS);
+  }
+  function pauseAutoRefresh(){ if(autoRefreshTimer) clearInterval(autoRefreshTimer); autoRefreshTimer = null; }
+  function resumeAutoRefresh(){ if(!autoRefreshTimer) startAutoRefresh(); }
+
+  // ---------- Token management ----------
+  function showTokenBox(){
+    tokenBox.style.display = tokenBox.style.display === 'none' ? 'block' : 'none';
+    const existing = localStorage.getItem(TOKEN_KEY) || '';
+    tokenInput.value = existing ? existing.replace(/.(?=.{4})/g,'•') : ''; // obfuscate
+  }
+  function saveToken(){
+    const val = tokenInput.value.trim();
+    if(!val){ statusArea.textContent = 'Token vazio — inserção cancelada.'; return; }
+    localStorage.setItem(TOKEN_KEY, val);
+    statusArea.textContent = 'Token salvo localmente.';
+    tokenBox.style.display='none';
+  }
+  function clearToken(){
+    if(confirm('Remover token salvo do navegador?')) {
+      localStorage.removeItem(TOKEN_KEY);
+      statusArea.textContent = 'Token removido.';
+    }
+  }
+
+  // ---------- Event wiring ----------
+  gearBtn.addEventListener('click', ()=> {
+    if(dataScreen.style.display === 'flex') closeDataScreen();
+    else openDataScreen();
+  });
+  closeData.addEventListener('click', ()=> closeDataScreen());
+  manualRefreshBtn.addEventListener('click', async ()=> { await doRefresh(); statusArea.textContent = 'Atualizado manualmente.'; });
+
+  operationSelect.addEventListener('change', ()=> renderAll());
+
+  // data screen listeners
+  operationInput.addEventListener('change', updateAccumulatorsForDataScreen);
+  rotaInput.addEventListener('change', updateAccumulatorsForDataScreen);
+  inputArrec.addEventListener('input', ()=> liveSummary.textContent = `Digitado: ${fmtBRL(Number(inputArrec.value)||0)} • ${fmtBRL(Number(inputLucro.value)||0)} • ${fmtBRL(Number(inputSaidas.value)||0)}`);
+  inputLucro.addEventListener('input', ()=> liveSummary.textContent = `Digitado: ${fmtBRL(Number(inputArrec.value)||0)} • ${fmtBRL(Number(inputLucro.value)||0)} • ${fmtBRL(Number(inputSaidas.value)||0)}`);
+  inputSaidas.addEventListener('input', ()=> liveSummary.textContent = `Digitado: ${fmtBRL(Number(inputArrec.value)||0)} • ${fmtBRL(Number(inputLucro.value)||0)} • ${fmtBRL(Number(inputSaidas.value)||0)}`);
+  submitBtn.addEventListener('click', handleSubmit);
+
+  showTokenBtn.addEventListener('click', showTokenBox);
+  saveTokenBtn.addEventListener('click', saveToken);
+  clearTokenBtn.addEventListener('click', clearToken);
+
+  // ---------- Initialization ----------
+  async function init(){
+    // Load local token status (doesn't reveal it)
+    const existingToken = localStorage.getItem(TOKEN_KEY);
+    if(existingToken) tokenInfo.textContent = 'Token presente no navegador. (Visível apenas aqui)';
+    else tokenInfo.textContent = 'Token não encontrado. Clique em "Inserir/Atualizar Token" para ativar gravações no GitHub.';
+
+    // initial fetch & render
+    await fetchDataRaw();
+    renderAll();
+
+    // start auto refresh
+    startAutoRefresh();
+  }
+
+  // Run init
+  init();
+
+  // Debug helper (expose some functions in console during development)
+  window._cashdash = {
+    fetchDataRaw, fetchFileSha, pushDataJsonToGitHub, get localData(){ return dataJson; }
+  };
+
+})();
+</script>
+</body>
+</html>
